@@ -201,7 +201,7 @@ func (d *DB) CopyOrphanedDataFromExcluding(
 	if err := reconcileTranscriptRevisionsTx(ctx, tx); err != nil {
 		return nil, fmt.Errorf("reconciling transcript revisions: %w", err)
 	}
-	if err := reconcileConversationResyncTx(ctx, tx); err != nil {
+	if err := reconcileConversationResyncTx(ctx, tx, d.usageOnlyStorage()); err != nil {
 		return nil, fmt.Errorf("reconciling conversation identities: %w", err)
 	}
 	if count > 0 {

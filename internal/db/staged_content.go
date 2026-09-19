@@ -324,7 +324,7 @@ func commitStagedDerivedStateAndCheckpoint(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, true); err != nil {
+	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, true, false); err != nil {
 		return err
 	}
 	// The staged transcript is byte-for-byte identical, so preserve every
@@ -436,7 +436,7 @@ func (db *DB) replaceSessionContentStaged(
 	}
 	var pendingRecallRevocations recallEvidenceRevocationEvents
 
-	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, true); err != nil {
+	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, true, false); err != nil {
 		return err
 	}
 	if err := replaceSessionMessagesTxStaged(

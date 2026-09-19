@@ -359,9 +359,8 @@ func conversationRowFromMessage(m Message) (conversationRow, bool) {
 // reconcileConversationMessagesTx runs before physical row replacement. Only
 // native source identity or an unchanged complete projection preserves IDs;
 // content digests are equality evidence, never logical message identifiers.
-func reconcileConversationMessagesTx(tx transactionQueries, sessionID string, msgs []Message, replace bool) error {
+func reconcileConversationMessagesTx(tx transactionQueries, sessionID string, msgs []Message, replace, usageOnly bool) error {
 	var incoming []conversationRow
-	proven := false
 	counts := map[string]int{}
 	for _, msg := range msgs {
 		msg.SessionID = sessionID
@@ -376,7 +375,6 @@ func reconcileConversationMessagesTx(tx transactionQueries, sessionID string, ms
 			}
 		}
 		row, ok := conversationRowFromMessage(msg)
-		proven = proven || msg.VisibleText != nil
 		if !ok {
 			continue
 		}
@@ -403,7 +401,12 @@ func reconcileConversationMessagesTx(tx transactionQueries, sessionID string, ms
 	for i := range incoming {
 		row := &incoming[i]
 		if equal {
-			row.MessageID, row.Gap = old[i].MessageID, old[i].Gap
+			row.MessageID = old[i].MessageID
+			// Identity gaps survive an unchanged projection; policy gaps must
+			// reflect this write even when parser-proven text is still absent.
+			if old[i].Gap != "archive_content_excluded" {
+				row.Gap = old[i].Gap
+			}
 		} else if row.sourceID != "" {
 			var count int
 			var id string
@@ -436,6 +439,9 @@ func reconcileConversationMessagesTx(tx transactionQueries, sessionID string, ms
 			}
 			row.MessageID = hex.EncodeToString(id[:])
 		}
+		if usageOnly {
+			row.Gap = "archive_content_excluded"
+		}
 		retained[row.MessageID] = true
 	}
 	for _, row := range old {
@@ -450,7 +456,7 @@ func reconcileConversationMessagesTx(tx transactionQueries, sessionID string, ms
 			return err
 		}
 	}
-	if replace && proven {
+	if replace && !usageOnly {
 		var hadGap, deleted bool
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM conversation_session_changes WHERE session_id=? AND gap='archive_content_excluded'),
 		 COALESCE((SELECT deleted_at IS NOT NULL FROM sessions WHERE id=?),1)`, sessionID, sessionID).Scan(&hadGap, &deleted); err != nil {

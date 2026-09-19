@@ -1451,7 +1451,7 @@ func (db *DB) insertMessages(ctx context.Context,
 
 	if len(msgs) > 0 {
 		for _, sessionID := range messageSessionIDs(msgs) {
-			if err := reconcileConversationMessagesTx(tx, sessionID, messagesForSession(msgs, sessionID), false); err != nil {
+			if err := reconcileConversationMessagesTx(tx, sessionID, messagesForSession(msgs, sessionID), false, db.usageOnlyStorage()); err != nil {
 				return err
 			}
 		}
@@ -1688,7 +1688,7 @@ func (db *DB) writeSessionIncremental(ctx context.Context,
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, false); err != nil {
+	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, false, db.usageOnlyStorage()); err != nil {
 		return false, err
 	}
 	if err := writeMessagesTx(tx, msgs); err != nil {
@@ -1950,7 +1950,7 @@ func (db *DB) replaceSessionMessages(ctx context.Context,
 	}
 	var pendingRecallRevocations recallEvidenceRevocationEvents
 
-	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, true); err != nil {
+	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, true, db.usageOnlyStorage()); err != nil {
 		return err
 	}
 	if useDiff {
@@ -2340,7 +2340,7 @@ func (db *DB) replaceSessionContent(ctx context.Context,
 	}
 	var pendingRecallRevocations recallEvidenceRevocationEvents
 
-	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, true); err != nil {
+	if err := reconcileConversationMessagesTx(tx, sessionID, msgs, true, db.usageOnlyStorage()); err != nil {
 		return err
 	}
 	if useDiff {

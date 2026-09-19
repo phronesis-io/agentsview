@@ -173,11 +173,12 @@ func copyConversationSessionStatesTx(ctx context.Context, tx *sql.Tx, where stri
 
 // Rebuilt archives preserve opaque IDs from the old projection before matching
 // freshly parsed messages. The new database keeps its own publication counter.
-func reconcileConversationResyncTx(ctx context.Context, tx *sql.Tx) error {
+func reconcileConversationResyncTx(ctx context.Context, tx *sql.Tx, usageOnly bool) error {
 	if !oldDBHasTable(ctx, tx, "conversation_messages") {
 		return nil
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT id FROM main.sessions WHERE id IN (SELECT session_id FROM old_db.conversation_messages)`)
+	// Trash was copied without reparsing, so keep its original projection and gaps.
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM main.sessions WHERE deleted_at IS NULL AND id IN (SELECT session_id FROM old_db.conversation_messages)`)
 	if err != nil {
 		return err
 	}
@@ -215,7 +216,7 @@ func reconcileConversationResyncTx(ctx context.Context, tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO main.conversation_messages (`+conversationCopyColumns+`) SELECT `+conversationCopyColumns+` FROM old_db.conversation_messages WHERE session_id=?`, id); err != nil {
 			return err
 		}
-		if err := reconcileConversationMessagesTx(tx, id, msgs, true); err != nil {
+		if err := reconcileConversationMessagesTx(tx, id, msgs, true, usageOnly); err != nil {
 			return err
 		}
 	}

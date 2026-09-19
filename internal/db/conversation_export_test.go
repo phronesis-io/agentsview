@@ -251,6 +251,84 @@ func TestConversationExportCopiedUsagePolicyDropsBody(t *testing.T) {
 	assert.Equal(t, "archive_content_excluded", body.Gap)
 }
 
+func TestConversationExportResyncPreservesCopiedPolicyGap(t *testing.T) {
+	for _, trashed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("trashed=%t", trashed), func(t *testing.T) {
+			source := testDB(t)
+			source.SetArchiveContent(config.ArchiveContentUsage)
+			require.NoError(t, source.UpsertSession(t.Context(), Session{ID: "chat", Project: "sample", Machine: "local", Agent: "codex"}))
+			require.NoError(t, source.InsertMessages(t.Context(), []Message{{SessionID: "chat", Role: "assistant", Content: "Unclassified transcript"}}))
+			if trashed {
+				require.NoError(t, source.SoftDeleteSession(t.Context(), "chat"))
+			}
+			destination := testDB(t)
+			_, err := destination.CopyTrashedDataFrom(source.Path())
+			require.NoError(t, err)
+			_, err = destination.CopyOrphanedDataFrom(source.Path())
+			require.NoError(t, err)
+			if trashed {
+				_, err = destination.RestoreSession(t.Context(), "chat")
+				require.NoError(t, err)
+			}
+			copied, err := destination.ExportConversationChanges(t.Context(), ConversationExportOptions{})
+			require.NoError(t, err)
+			require.Len(t, copied.Changes, 2)
+			for _, change := range copied.Changes {
+				assert.Equal(t, "archive_content_excluded", change.Gap, change.Type)
+			}
+		})
+	}
+}
+
+func TestConversationExportFullRewriteClearsPolicyGap(t *testing.T) {
+	for _, sourceID := range []string{"", "source-one"} {
+		t.Run("source="+sourceID, func(t *testing.T) {
+			d := testDB(t)
+			d.SetArchiveContent(config.ArchiveContentUsage)
+			require.NoError(t, d.UpsertSession(t.Context(), Session{ID: "chat", Project: "sample", Machine: "local", Agent: "codex"}))
+			msgs := []Message{{SessionID: "chat", Role: "assistant", Content: "Unclassified transcript", ConversationSourceID: sourceID}}
+			require.NoError(t, d.InsertMessages(t.Context(), msgs))
+			initial, err := d.ExportConversationChanges(t.Context(), ConversationExportOptions{})
+			require.NoError(t, err)
+			require.Len(t, initial.Changes, 2)
+			message := initial.Changes[1]
+			assert.Equal(t, "message", message.Type)
+			assert.Equal(t, "archive_content_excluded", message.Gap)
+			assert.Equal(t, "archive_content_excluded", initial.Changes[0].Gap)
+
+			require.NoError(t, d.ReplaceSessionMessages(t.Context(), "chat", msgs))
+			quiet, err := d.ExportConversationChanges(t.Context(), ConversationExportOptions{Checkpoint: initial.Checkpoint})
+			require.NoError(t, err)
+			assert.Empty(t, quiet.Changes, "an unchanged usage-only rewrite must not republish gaps")
+
+			path := d.Path()
+			require.NoError(t, d.Close())
+			full, err := OpenIsolated(t.Context(), path)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, full.Close()) })
+			require.NoError(t, full.ReplaceSessionMessages(t.Context(), "chat", msgs))
+			updated, err := full.ExportConversationChanges(t.Context(), ConversationExportOptions{Checkpoint: quiet.Checkpoint})
+			require.NoError(t, err)
+			require.Len(t, updated.Changes, 2)
+			assert.Equal(t, message.MessageID, updated.Changes[0].MessageID)
+			assert.Equal(t, "visible_text_unavailable", updated.Changes[0].Gap)
+			assert.Equal(t, "session", updated.Changes[1].Type)
+			assert.Empty(t, updated.Changes[1].Gap)
+			body, err := full.GetConversationMessage(t.Context(), ConversationMessageOptions{
+				DatabaseID: updated.DatabaseID, SessionID: "chat", MessageID: message.MessageID, Revision: updated.Changes[0].Revision,
+			})
+			require.NoError(t, err)
+			assert.Nil(t, body.Text)
+			assert.Equal(t, "visible_text_unavailable", body.Gap)
+
+			require.NoError(t, full.ReplaceSessionMessages(t.Context(), "chat", msgs))
+			quiet, err = full.ExportConversationChanges(t.Context(), ConversationExportOptions{Checkpoint: updated.Checkpoint})
+			require.NoError(t, err)
+			assert.Empty(t, quiet.Changes)
+		})
+	}
+}
+
 func TestConversationExportNoSourceIdentityIsExplicit(t *testing.T) {
 	d := testDB(t)
 	ctx := t.Context()
