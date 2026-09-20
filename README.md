@@ -1,5 +1,8 @@
 # agentsview
 
+> **团队 fork(phronesis-io)**：安装、后台持续导入、协作约定见
+> [phronesis/README.md](phronesis/README.md)。以下为上游原文。
+
 Browse, search, and track costs across your AI coding agents. Your session
 archive stays on your machine unless you choose a feature that shares it.
 
