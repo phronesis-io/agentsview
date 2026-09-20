@@ -32,6 +32,17 @@ cd agentsview
 
 装完打开 **http://127.0.0.1:8080** 。
 
+### 已经装过官方版的
+
+直接照上面三行装就行，不用先卸载：
+
+- 脚本会找到你现有的 `agentsview`，**原地替换**，旧的备份成 `agentsview.before-phronesis`
+- 已有的会话库 `~/.agentsview` 原样保留，脚本会全量重新解析一遍，
+  之前看不到的 Codex 命令会补出来
+- 如果你装的是官方**桌面 App**(dmg / `brew install --cask agentsview`)：先退出它，
+  以后用浏览器开 http://127.0.0.1:8080 。桌面 App 自带一份旧的后端，
+  和我们这份同时跑会抢同一个库
+
 ## 二、怎么用
 
 - 左侧是会话列表，可以按 agent(Codex / Claude …)、项目、时间筛选

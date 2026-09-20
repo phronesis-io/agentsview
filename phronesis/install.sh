@@ -9,6 +9,12 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# If an official agentsview is already installed, replace it in place (keeping
+# a backup) so there is only ever one agentsview on PATH.
+EXISTING="$(command -v agentsview 2>/dev/null || true)"
+if [ -z "${BIN_DIR:-}" ] && [ -n "$EXISTING" ] && [ -w "$(dirname "$EXISTING")" ]; then
+  BIN_DIR="$(dirname "$EXISTING")"
+fi
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 LABEL="io.phronesis.agentsview.sync"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -27,9 +33,19 @@ echo "==> 安装到 $BIN_DIR/agentsview"
 mkdir -p "$BIN_DIR"
 if [ -x "$BIN_DIR/agentsview" ] && [ -z "${NO_SERVICE:-}" ]; then
   "$BIN_DIR/agentsview" serve stop >/dev/null 2>&1 || true
+  if [ ! -e "$BIN_DIR/agentsview.before-phronesis" ]; then
+    cp "$BIN_DIR/agentsview" "$BIN_DIR/agentsview.before-phronesis"
+    echo "    原有版本已备份为 $BIN_DIR/agentsview.before-phronesis"
+  fi
 fi
 install -m 0755 "$REPO/agentsview" "$BIN_DIR/agentsview"
 "$BIN_DIR/agentsview" --version
+
+OTHER="$(command -v agentsview 2>/dev/null || true)"
+if [ -n "$OTHER" ] && [ "$OTHER" != "$BIN_DIR/agentsview" ]; then
+  echo "注意: PATH 里排在前面的是另一份 $OTHER(这次没替换它)。" >&2
+  echo "      请删掉它或用新版覆盖它,否则命令行敲 agentsview 用的还是旧版。" >&2
+fi
 
 if [ -n "${NO_SERVICE:-}" ]; then
   echo "NO_SERVICE=1: 跳过后台任务。手动启动: $BIN_DIR/agentsview serve"
