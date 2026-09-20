@@ -79,7 +79,6 @@ type codexSessionBuilder struct {
 	committedUsageBlockedByUser bool
 	messageUsageUpdates         []ParsedMessageTokenUsageUpdate
 	checkpointUnsafe            bool
-	conversationProjection      bool
 	// Calls beyond the persisted cursor's capacity remain parse-local until
 	// enough results arrive to fit the bounded checkpoint again.
 	overflowPendingCalls map[string]codexPendingToolCall
@@ -224,15 +223,14 @@ func newCodexSessionBuilder(
 	sink CodexSessionSink,
 ) *codexSessionBuilder {
 	return &codexSessionBuilder{
-		sink:                   sink,
-		projectContext:         ctx,
-		resolveParentTurns:     resolveParentTurns,
-		project:                "unknown",
-		conversationProjection: true,
-		callNames:              make(map[string]string),
-		agentSpawnCalls:        make(map[string]string),
-		agentWaitCalls:         make(map[string]string),
-		pendingAgentEvents:     make(map[string][]codexPendingEvent),
+		sink:               sink,
+		projectContext:     ctx,
+		resolveParentTurns: resolveParentTurns,
+		project:            "unknown",
+		callNames:          make(map[string]string),
+		agentSpawnCalls:    make(map[string]string),
+		agentWaitCalls:     make(map[string]string),
+		pendingAgentEvents: make(map[string][]codexPendingEvent),
 	}
 }
 
@@ -457,10 +455,6 @@ func (b *codexSessionBuilder) handleResponseItem(ctx context.Context,
 		return
 	}
 
-	var visibleText *string
-	if b.conversationProjection {
-		visibleText = extractCodexVisibleText(payload, !b.firstUserSeen)
-	}
 	content := extractCodexContent(payload)
 	if role == "user" && b.handleSubagentNotification(ctx, content, ts) {
 		return
@@ -496,13 +490,11 @@ func (b *codexSessionBuilder) handleResponseItem(ctx context.Context,
 	}
 
 	msg := ParsedMessage{
-		Role:                 RoleType(role),
-		Content:              content,
-		VisibleText:          visibleText,
-		Timestamp:            ts,
-		ContentLength:        len(content),
-		Model:                b.model,
-		ConversationSourceID: b.conversationSourceID(payload),
+		Role:          RoleType(role),
+		Content:       content,
+		Timestamp:     ts,
+		ContentLength: len(content),
+		Model:         b.model,
 	}
 	if role == string(RoleAssistant) {
 		msg.ReasoningEffort = b.reasoningEffort
@@ -529,13 +521,11 @@ func (b *codexSessionBuilder) handleAgentMessage(
 	b.committedUsageTarget = nil
 	b.committedUsageBlockedByUser = true
 	b.sink.AppendMessage(ParsedMessage{
-		Role:                 RoleUser,
-		Content:              content,
-		VisibleText:          b.emptyConversationText(),
-		Timestamp:            ts,
-		ContentLength:        len(content),
-		Model:                b.model,
-		ConversationSourceID: b.conversationSourceID(payload),
+		Role:          RoleUser,
+		Content:       content,
+		Timestamp:     ts,
+		ContentLength: len(content),
+		Model:         b.model,
 	})
 }
 
@@ -649,15 +639,13 @@ func (b *codexSessionBuilder) handleFunctionCall(
 	}
 
 	messageOrdinal := b.sink.AppendMessage(ParsedMessage{
-		Role:                 RoleAssistant,
-		Content:              content,
-		VisibleText:          b.emptyConversationText(),
-		Timestamp:            ts,
-		HasToolUse:           true,
-		ContentLength:        len(content),
-		Model:                b.model,
-		ReasoningEffort:      b.reasoningEffort,
-		ConversationSourceID: b.conversationSourceID(payload),
+		Role:            RoleAssistant,
+		Content:         content,
+		Timestamp:       ts,
+		HasToolUse:      true,
+		ContentLength:   len(content),
+		Model:           b.model,
+		ReasoningEffort: b.reasoningEffort,
 		ToolCalls: []ParsedToolCall{{
 			ToolUseID: callID,
 			ToolName:  name,
@@ -887,7 +875,6 @@ func (b *codexSessionBuilder) flushPendingAgentResultsContext(
 					Ordinal:       ev.ordinal,
 					Role:          RoleUser,
 					Content:       ev.text,
-					VisibleText:   b.emptyConversationText(),
 					SourceSubtype: SourceSubtypeToolResult,
 					Timestamp:     ev.timestamp,
 					Model:         b.model,
@@ -1445,119 +1432,6 @@ func extractCodexContent(payload gjson.Result) string {
 	return strings.Join(extractCodexTextBlocks(payload), "\n")
 }
 
-// extractCodexVisibleText projects only provider-typed user prose and
-// user-visible assistant phases. Missing or unfamiliar typing returns nil so
-// callers cannot mistake an unproven legacy shape for safe export text.
-func extractCodexVisibleText(payload gjson.Result, initialUser bool) *string {
-	parts, safe := extractCodexVisibleTextParts(payload)
-	if !safe {
-		return nil
-	}
-	if payload.Get("role").Str == "user" {
-		return visibleTextValue(preprocessCodexUserTextBlocks(parts, initialUser))
-	}
-	return visibleTextValue(strings.Join(parts, "\n"))
-}
-
-func extractCodexVisibleTextParts(payload gjson.Result) ([]string, bool) {
-	if payload.Get("type").Str != "message" {
-		return nil, false
-	}
-	role := payload.Get("role").Str
-	if role != "user" && role != "assistant" {
-		return nil, false
-	}
-	content := payload.Get("content")
-	if !content.IsArray() {
-		return nil, false
-	}
-
-	assistantPhaseKnown := true
-	if role == "assistant" {
-		switch payload.Get("phase").Str {
-		case "commentary", "final_answer":
-		default:
-			assistantPhaseKnown = false
-		}
-	}
-
-	var (
-		parts []string
-		safe  = true
-	)
-	content.ForEach(func(_, block gjson.Result) bool {
-		if !block.IsObject() {
-			safe = false
-			return false
-		}
-		switch block.Get("type").Str {
-		case "input_image":
-			// Recognized non-prose content.
-		case "input_text":
-			if role != "user" {
-				safe = false
-				return false
-			}
-			text := block.Get("text")
-			if text.Type != gjson.String {
-				safe = false
-				return false
-			}
-			if text.Str != "" {
-				parts = append(parts, text.Str)
-			}
-		case "output_text":
-			if role != "assistant" {
-				safe = false
-				return false
-			}
-			if !assistantPhaseKnown {
-				safe = false
-				return false
-			}
-			text := block.Get("text")
-			if text.Type != gjson.String {
-				safe = false
-				return false
-			}
-			if text.Str != "" {
-				parts = append(parts, text.Str)
-			}
-		default:
-			safe = false
-			return false
-		}
-		return true
-	})
-	if !safe {
-		return nil, false
-	}
-	return parts, true
-}
-
-func codexConversationSourceID(payload gjson.Result) string {
-	switch payload.Get("type").Str {
-	case "message", "agent_message", "function_call", "custom_tool_call":
-		return payload.Get("id").Str
-	default:
-		return ""
-	}
-}
-
-func (b *codexSessionBuilder) conversationSourceID(payload gjson.Result) string {
-	if !b.conversationProjection {
-		return ""
-	}
-	return codexConversationSourceID(payload)
-}
-
-func (b *codexSessionBuilder) emptyConversationText() *string {
-	if !b.conversationProjection {
-		return nil
-	}
-	return visibleTextValue("")
-}
-
 func extractCodexInboundAgentMessage(
 	payload gjson.Result, agentPath string,
 ) string {
@@ -1609,7 +1483,7 @@ func codexAgentPathLeaf(agentPath string) string {
 }
 
 // preprocessCodexUserTextBlocks removes recognized injected context from each
-// block before display, prompt classification, or conversation export. Plugin
+// block before display and prompt classification. Plugin
 // discovery remains initial-only so later user quotations are preserved.
 func preprocessCodexUserTextBlocks(texts []string, initial bool) string {
 	if initial && len(texts) > 0 {
@@ -1881,7 +1755,6 @@ func (p *codexProvider) parseCodexSessionSnapshotStreaming(
 	b := newCodexSessionBuilder(
 		ctx, includeExec, p.parentTurnResolver(ctx, path), sink,
 	)
-	b.conversationProjection = p.spec.agent == AgentCodex
 	malformedLines := 0
 
 	for {
@@ -2642,7 +2515,6 @@ func (p *codexProvider) parseSessionFromWithSources(ctx context.Context,
 		p.parentTurnResolver(ctx, path),
 		NewCodexCollectingSink(startOrdinal),
 	)
-	b.conversationProjection = p.spec.agent == AgentCodex
 	b.codexCursorState = seed.codexCursorState
 	b.overflowPendingCalls = seed.overflowPendingCalls
 	if committedUsageTarget != nil {

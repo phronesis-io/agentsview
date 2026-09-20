@@ -14,7 +14,7 @@ import (
 
 func newExportConversationsCommand() *cobra.Command {
 	command := &cobra.Command{
-		Use: "conversations", Short: "Export visible conversation text and changes",
+		Use: "conversations", Short: "Export stored conversation text and changes",
 		Args: cobra.NoArgs, SilenceUsage: true,
 	}
 	command.AddCommand(newConversationChangesCommand(), newConversationMessageCommand())
@@ -89,7 +89,7 @@ func openConversationExportDB(command *cobra.Command) (*db.DB, error) {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
 	// Exports do not migrate or reparse the archive. The normal writable
-	// importer establishes extraction provenance and publication state.
+	// database initialization establishes the stored export index.
 	database, err := openReadOnlyDB(command.Context(), appConfig)
 	if err != nil {
 		return nil, fmt.Errorf("open local archive: %w", err)

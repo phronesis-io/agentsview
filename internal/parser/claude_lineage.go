@@ -89,9 +89,6 @@ var (
 type claudeParseOptions struct {
 	ctx                         context.Context
 	persistedOutputPathResolver func(string) (string, bool)
-	// conversationProjection is enabled only by the native Claude provider.
-	// Other producers reuse this parser without inheriting format coverage.
-	conversationProjection bool
 	// siblingLineage enables background-fork lineage resolution
 	// against sibling transcripts in the same directory.
 	siblingLineage bool

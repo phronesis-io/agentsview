@@ -497,10 +497,6 @@ type Message struct {
 	Ordinal   int    `json:"ordinal"`
 	Role      string `json:"role"`
 	Content   string `json:"content"`
-	// Parser-proven conversation fields are stored only in the local export
-	// projection. They are not part of message, artifact, or mirror wire formats.
-	VisibleText          *string `json:"-"`
-	ConversationSourceID string  `json:"-"`
 	// ThinkingText holds the concatenated text of all thinking
 	// blocks for this message; "" if none.
 	ThinkingText      string         `json:"thinking_text"`

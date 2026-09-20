@@ -15,11 +15,14 @@ atomically. Preserve sessions even when their source files no longer exist.
 
 ### Conversation export
 
-Conversation projection and change state are SQLite-only. Persist parser-proven
-visible prose before flattening tool/reasoning content, in the same transaction
-as messages and parser checkpoints. A missing proof is a gap; stored `content`
-is never a fallback. Usage-only writes publish a session-level coverage gap even
-when policy removes every message. Copied sessions obey the same policy.
+Conversation exports consume normalized SQLite message records for every agent.
+The database is the system of record: use stored content, roles, system markers,
+and source identities. Do not add agent allowlists, export-only parser fields,
+or source reparse requirements. Export metadata and message writes commit in the
+same transaction. After archive copies apply content policies, refresh the
+export index from the final stored messages while preserving their message IDs.
+Usage-only writes publish a session-level coverage gap even when policy removes
+every message.
 
 Message IDs are opaque archive identities, not row IDs, ordinals, timestamps, or
 text hashes. Preserve them through verified appends, unchanged complete
@@ -28,10 +31,9 @@ Changed no-ID replacements must report identity ambiguity. Rebuilds retain these
 IDs and tombstones but use the new database generation for revisions and
 cursors.
 
-When a legacy archive needs a rebuild, defer conversation backfill until source
-reparsing finishes. Only copied orphan or trashed sessions need legacy gap rows.
-Publishing placeholder IDs before the rebuild creates needless permanent
-tombstones for every successfully reparsed message.
+Initialize a missing conversation index from existing database messages on
+writable open. Copied orphans and trash use the same stored records; absent
+source files do not make their archived text unavailable.
 
 Keep only current bodies and compact latest changes, not a body event log.
 Project-only changes publish session invalidations without changing message

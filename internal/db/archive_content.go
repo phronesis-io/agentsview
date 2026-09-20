@@ -297,7 +297,6 @@ func usageOnlyMessages(messages []Message) []Message {
 			continue
 		}
 		message.Content = ""
-		message.VisibleText = nil
 		message.ThinkingText = ""
 		message.ToolCalls = usageOnlyToolCalls(message.ToolCalls)
 		message.ToolResults = nil
@@ -470,14 +469,19 @@ func applyArchiveContentToCopiedSessionsTx(
 	ctx context.Context, tx *sql.Tx, tempIDsTable string,
 	policy config.ArchiveContent,
 ) error {
+	var err error
 	switch policy {
+	case config.ArchiveContentFull:
+		// The copied content already matches the policy.
 	case config.ArchiveContentTranscripts:
-		return dropCopiedToolContentTx(ctx, tx, tempIDsTable)
+		err = dropCopiedToolContentTx(ctx, tx, tempIDsTable)
 	case config.ArchiveContentUsage:
-		return compactCopiedSessionsForUsageTx(ctx, tx, tempIDsTable)
-	default:
-		return nil
+		err = compactCopiedSessionsForUsageTx(ctx, tx, tempIDsTable)
 	}
+	if err != nil {
+		return err
+	}
+	return refreshConversationMessagesFromArchiveTx(ctx, tx, "session_id IN (SELECT id FROM "+tempIDsTable+")")
 }
 
 // toolOutputMarkerDataVersion is the first data version whose parsers mark

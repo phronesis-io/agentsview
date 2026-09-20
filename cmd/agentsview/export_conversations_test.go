@@ -89,8 +89,8 @@ func TestExportConversationsPagesBodiesAndCorrections(t *testing.T) {
 		MessageCount: 2, UserMessageCount: 2,
 	})
 	rows := []db.Message{
-		{SessionID: "conversation-a", Ordinal: 0, Role: "user", Content: "αβγ", VisibleText: new("αβγ"), ConversationSourceID: "native-a"},
-		{SessionID: "conversation-a", Ordinal: 1, Role: "user", Content: "αβγ", VisibleText: new("αβγ"), ConversationSourceID: "native-b"},
+		{SessionID: "conversation-a", Ordinal: 0, Role: "user", Content: "αβγ", SourceUUID: "native-a"},
+		{SessionID: "conversation-a", Ordinal: 1, Role: "user", Content: "αβγ", SourceUUID: "native-b"},
 	}
 	require.NoError(t, database.InsertMessages(t.Context(), rows))
 
@@ -146,7 +146,7 @@ func TestExportConversationsPagesBodiesAndCorrections(t *testing.T) {
 	assert.Equal(t, "γ", *body.Text)
 	assert.EqualValues(t, 6, body.NextOffset)
 
-	rows[0].Content, rows[0].VisibleText = "corrected", new("corrected")
+	rows[0].Content = "corrected"
 	require.NoError(t, database.ReplaceSessionMessages(t.Context(), "conversation-a", rows))
 	stdout, stderr, err = executeExportSessionsCommand(newRootCommand(),
 		"export", "conversations", "message", first.SessionID, first.MessageID,

@@ -212,7 +212,7 @@ func conversationArchiveIdentity(ctx context.Context, tx *sql.Tx) (string, strin
 	return archiveID, databaseID, err
 }
 
-// GetConversationMessage reads a byte-bounded, revision-pinned prose chunk.
+// GetConversationMessage reads a byte-bounded, revision-pinned stored text chunk.
 // Project evidence and the body are resolved in the same archive snapshot.
 func (db *DB) GetConversationMessage(ctx context.Context, opts ConversationMessageOptions) (ConversationMessage, error) {
 	var result ConversationMessage
@@ -339,14 +339,14 @@ func conversationRowsTx(tx transactionQueries, sessionID string) ([]conversation
 }
 
 func conversationRowFromMessage(m Message) (conversationRow, bool) {
-	if m.IsSystem || m.Role != "user" && m.Role != "assistant" || m.SourceSubtype == "tool_result" || m.VisibleText != nil && *m.VisibleText == "" {
+	if m.IsSystem || m.Role != "user" && m.Role != "assistant" || m.SourceSubtype == "tool_result" {
 		return conversationRow{}, false
 	}
-	row := conversationRow{Type: "message", SessionID: m.SessionID, Ordinal: m.Ordinal, Role: m.Role, Timestamp: optionalStringPtr(m.Timestamp), sourceID: m.ConversationSourceID, body: m.VisibleText}
-	if row.body == nil {
+	row := conversationRow{Type: "message", SessionID: m.SessionID, Ordinal: m.Ordinal, Role: m.Role, Timestamp: optionalStringPtr(m.Timestamp), sourceID: m.SourceUUID}
+	if m.Content == "" {
 		row.Gap = "visible_text_unavailable"
 	} else {
-		row.body = new(SanitizeUTF8(*row.body))
+		row.body = new(SanitizeUTF8(m.Content))
 		digest := sha256.Sum256([]byte(*row.body))
 		row.Digest, row.TextBytes = hex.EncodeToString(digest[:]), int64(len(*row.body))
 		if row.sourceID == "" {
@@ -364,16 +364,6 @@ func reconcileConversationMessagesTx(tx transactionQueries, sessionID string, ms
 	counts := map[string]int{}
 	for _, msg := range msgs {
 		msg.SessionID = sessionID
-		// Archive-owned rewrites (for example image projection) can carry a
-		// loaded physical row without parser fields. Reuse its proof only while
-		// that exact stored row and its content remain present in this transaction.
-		if msg.VisibleText == nil && msg.ID != 0 && msg.ConversationSourceID == "" {
-			err := tx.QueryRow(`SELECT c.body,c.source_id FROM conversation_messages c JOIN messages m ON m.session_id=c.session_id AND m.ordinal=c.ordinal
-			 WHERE m.id=? AND m.session_id=? AND m.content=? AND m.role=? AND m.is_system=? AND c.removed=0`, msg.ID, sessionID, msg.Content, msg.Role, msg.IsSystem).Scan(&msg.VisibleText, &msg.ConversationSourceID)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
-		}
 		row, ok := conversationRowFromMessage(msg)
 		if !ok {
 			continue
@@ -403,7 +393,7 @@ func reconcileConversationMessagesTx(tx transactionQueries, sessionID string, ms
 		if equal {
 			row.MessageID = old[i].MessageID
 			// Identity gaps survive an unchanged projection; policy gaps must
-			// reflect this write even when parser-proven text is still absent.
+			// reflect this write even when stored text is still absent.
 			if old[i].Gap != "archive_content_excluded" {
 				row.Gap = old[i].Gap
 			}

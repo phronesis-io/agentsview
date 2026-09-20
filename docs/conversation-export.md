@@ -1,34 +1,22 @@
 ---
 title: Conversation Export
-description: Incremental exports of visible user and assistant text
+description: Incremental exports of stored user and assistant messages
 ---
 
-Use conversation exports to maintain a lightweight copy of visible user and
+Use conversation exports to maintain a lightweight copy of stored user and
 assistant messages for reporting or analysis. Read a text-free changes listing
 first, select the sessions you want, then fetch only new or changed text.
 Activity exports remain separate: messages from an ongoing session do not wait
 for a reporting hour to close.
 
-These commands read the local SQLite archive. They do not send data anywhere,
-start a server, read the DuckDB mirror, or reparse source transcripts. The
-normal writable importer supplies the stored extraction evidence. An older
-archive needs the matching writable version before these exports can use the new
-state. Run `agentsview sync` with the new version first. Its normal data-version
-upgrade reparses available sources and preserves orphaned sessions; it does not
-discard the existing archive. Orphans without extraction evidence remain gaps.
-The upgrade does not assign temporary message IDs before reparsing: consumers
-receive the real projection or an orphan gap, not deletions of placeholders.
+These commands read normalized messages from the local SQLite archive. They work
+across all supported agents and imported archives, including sessions whose
+source files are no longer available. They do not contact an agent, reparse its
+transcripts, start a server, or read the DuckDB mirror.
 
-Only conversation exports require the conversation tables. Existing session and
-reporting exports can still read an otherwise compatible archive without them.
-
-## Source coverage
-
-| Source                                         | Text available                                                                  | Limits                                                                                                                  |
-| ---------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Claude Code                                    | User text and assistant text blocks, including intermediate replies             | Unfamiliar block shapes remain gaps. Assistant chunks use their shared message identity.                                |
-| Codex                                          | User input text and assistant output text marked `commentary` or `final_answer` | Assistant records without a recognized phase remain gaps. Native message IDs are optional.                              |
-| Other providers and imported archive artifacts | No proved prose projection yet                                                  | Existing display text is not used as a fallback. Sharing a parser implementation does not imply source-format coverage. |
+On the first writable open with this version, AgentsView builds the conversation
+change index from existing database records. No source reparse is required for
+this export. Existing session and reporting exports keep their current formats.
 
 ## Start a copy and keep it current
 
@@ -95,20 +83,15 @@ fetching bodies they already hold when reconciling a rebuilt archive.
 
 ## What text means
 
-Allowed text is user prose and visible assistant prose, including commentary and
-intermediate updates. Extraction inspects source blocks and channels before the
-display transcript is flattened. It excludes structured tool calls, arguments
-and results; system/developer instructions; synthetic notices; and hidden
-reasoning. Selecting rows by role alone does not provide this boundary.
+Text is the `content` stored on user and assistant message records. All agents
+use the same database fields and export path. Messages marked as system content
+or tool results are omitted. The export does not include separate thinking text,
+tool arguments, or tool-result fields.
 
-Claude image and document blocks contribute no text, but do not suppress prose
-in neighboring `text` blocks. Redacted thinking contributes no text either.
-Assistant records flagged `isApiErrorMessage` are synthetic notices, not
-replies.
-
-Ordinary prose may contain pasted code, logs or quoted tool output. Those
-passages remain text. The exporter does not remove strings merely because they
-look like a tool label or a reasoning marker.
+The database is the source of truth. Text, code, logs, and any inline formatting
+already present in `content` are preserved. The export does not reinterpret
+provider formats or apply a second classification of message text. Storage
+policies still control which content is retained and available for export.
 
 Existing session summaries remain content-free. Their usage and cost are session
 facts, not measured per-message costs or human working time. Join records
@@ -123,23 +106,22 @@ generation invalidates a saved checkpoint: the command leaves stdout empty,
 writes a `reconciliation_required` JSON error to stderr, and exits with code 4.
 Reconcile the new generation rather than treating it as an empty update.
 
-Native source identities support edits, insertion and deletion without turning
-every change into another utterance. Some source formats lack native message
-IDs. Proven append operations and unchanged replacement snapshots can preserve
-their assigned identities; an arbitrary rewrite cannot be identified reliably by
-matching positions, timestamps or repeated text. Such ambiguity is a coverage
-gap, not proof that a previous citation still identifies the same utterance.
+Native identities stored in `source_uuid` support edits, insertion and deletion
+without turning every change into another utterance. Some source formats lack
+native message IDs. Proven append operations and unchanged replacement snapshots
+can preserve their assigned identities; an arbitrary rewrite cannot be
+identified reliably by matching positions, timestamps or repeated text. Such
+ambiguity is a coverage gap, not proof that a previous citation still identifies
+the same utterance.
 
 A full resync is a replacement too. If a session's complete projection changes,
 messages without native IDs can become `identity_ambiguous` even when their own
-text is unchanged. An identical complete projection preserves those IDs. Claude
-assistant chunks share identity only within a consecutive run; non-consecutive
-reuse of `message.id` is ambiguous rather than proof of one continuing reply.
+text is unchanged. An identical complete projection preserves those IDs. Each
+exported message corresponds to a normalized database message record.
 
-Missing parser provenance and content unavailable under archive policy are
-explicit gaps. They are not empty successful conversations. Do not recover text
-by reading the flattened `Content` field or raw artifacts as a fallback. The
-`gap` values distinguish `visible_text_unavailable`, `archive_content_excluded`,
+Messages without stored content and content excluded by archive policy are
+explicit gaps. They are not empty successful conversations. The `gap` values
+distinguish `visible_text_unavailable`, `archive_content_excluded`,
 `identity_unavailable`, and `identity_ambiguous`. An identity gap may still have
 readable text; a content gap has `text: null`. Retained orphaned sessions are
 not deleted merely because their source files are unavailable. A deletion record
@@ -153,7 +135,7 @@ it for analysis.
 
 ## Storage and work per poll
 
-The local archive keeps one current prose projection per message, plus compact
+The local archive keeps current message text in its export index, plus compact
 change and deletion metadata. It does not retain each intermediate body as an
 event log or track individual consumers. Changes queries seek by publication
 revision; unchanged polling does not walk transcript bodies. Text fetches are

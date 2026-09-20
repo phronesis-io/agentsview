@@ -79,7 +79,7 @@ BEGIN
  ON CONFLICT(session_id) DO UPDATE SET revision=excluded.revision,deleted=excluded.deleted;
 END;`
 
-func ensureConversationSchemaLocked(ctx context.Context, w *writerHandle, rebuildPending bool) error {
+func ensureConversationSchemaLocked(ctx context.Context, w *writerHandle, usageOnly bool) error {
 	tx, err := w.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -92,11 +92,28 @@ func ensureConversationSchemaLocked(ctx context.Context, w *writerHandle, rebuil
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM archive_metadata WHERE key='conversation_export_initialized')`).Scan(&initialized); err != nil {
 		return err
 	}
-	if !initialized && !rebuildPending {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_messages(session_id,message_id,ordinal,role,timestamp,gap,deleted)
-		 SELECT m.session_id,lower(hex(randomblob(16))),m.ordinal,m.role,COALESCE(m.timestamp,''),'visible_text_unavailable',s.deleted_at IS NOT NULL
-		 FROM messages m JOIN sessions s ON s.id=m.session_id WHERE m.role IN ('user','assistant') AND m.is_system=0 AND COALESCE(m.source_subtype,'')!='tool_result'`); err != nil {
+	if !initialized {
+		if err := refreshConversationMessagesFromArchiveTx(ctx, tx, "1=1"); err != nil {
 			return err
+		}
+		if usageOnly {
+			rows, err := tx.QueryContext(ctx, `SELECT id FROM sessions`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err != nil {
+					return err
+				}
+				if err := clearUsageOnlyConversationTx(contextTransaction{ctx: ctx, tx: tx}, id); err != nil {
+					return err
+				}
+			}
+			if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+				return err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO archive_metadata(key,value) VALUES ('conversation_export_initialized','1')`); err != nil {
 			return err
@@ -107,6 +124,40 @@ func ensureConversationSchemaLocked(ctx context.Context, w *writerHandle, rebuil
 
 const conversationCopyColumns = `session_id,message_id,ordinal,role,timestamp,source_id,body,digest,text_bytes,gap,deleted,removed`
 
+// Initialize exports or refresh copied rows after archive policy has changed
+// their stored content. These are the same archived messages, so keep their IDs.
+func refreshConversationMessagesFromArchiveTx(ctx context.Context, tx *sql.Tx, where string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT m.session_id,m.ordinal,m.role,m.content,COALESCE(m.timestamp,''),m.source_uuid,
+	 COALESCE(c.message_id,lower(hex(randomblob(16)))),COALESCE(c.gap,''),COUNT(*) OVER (PARTITION BY m.session_id,m.source_uuid)
+	 FROM (SELECT * FROM messages WHERE role IN ('user','assistant') AND is_system=0 AND source_subtype!='tool_result' AND `+where+`) m
+	 LEFT JOIN conversation_messages c ON c.session_id=m.session_id AND c.ordinal=m.ordinal AND c.removed=0
+	 ORDER BY m.session_id,m.ordinal`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var msg Message
+		var id, gap string
+		var sourceCount int
+		if err := rows.Scan(&msg.SessionID, &msg.Ordinal, &msg.Role, &msg.Content, &msg.Timestamp, &msg.SourceUUID, &id, &gap, &sourceCount); err != nil {
+			return err
+		}
+		row, _ := conversationRowFromMessage(msg)
+		row.MessageID = id
+		if gap == "identity_ambiguous" || msg.SourceUUID != "" && sourceCount > 1 {
+			row.Gap = "identity_ambiguous"
+		}
+		if gap == "archive_content_excluded" && row.body == nil {
+			row.Gap = gap
+		}
+		if err := putConversationRowTx(contextTransaction{ctx: ctx, tx: tx}, row); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
 func copyConversationRowsTx(ctx context.Context, tx *sql.Tx, where string) error {
 	var initialized bool
 	if oldDBHasTable(ctx, tx, "conversation_messages") {
@@ -115,11 +166,7 @@ func copyConversationRowsTx(ctx context.Context, tx *sql.Tx, where string) error
 		}
 	}
 	if !initialized {
-		_, err := tx.ExecContext(ctx, `INSERT INTO main.conversation_messages(session_id,message_id,ordinal,role,timestamp,gap,deleted)
-		 SELECT session_id,lower(hex(randomblob(16))),ordinal,role,COALESCE(timestamp,''),'visible_text_unavailable',
-		 COALESCE((SELECT deleted_at IS NOT NULL FROM main.sessions WHERE id=m.session_id),0)
-		 FROM main.messages m WHERE role IN ('user','assistant') AND is_system=0 AND COALESCE(source_subtype,'')!='tool_result' AND `+where)
-		return err
+		return refreshConversationMessagesFromArchiveTx(ctx, tx, where)
 	}
 	_, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO main.conversation_messages (`+conversationCopyColumns+`) SELECT `+conversationCopyColumns+` FROM old_db.conversation_messages WHERE `+where)
 	if err != nil {
@@ -204,7 +251,10 @@ func reconcileConversationResyncTx(ctx context.Context, tx *sql.Tx, usageOnly bo
 		}
 		msgs := make([]Message, 0, len(current))
 		for _, row := range current {
-			msg := Message{SessionID: id, Ordinal: row.Ordinal, Role: row.Role, VisibleText: row.body, ConversationSourceID: row.sourceID}
+			msg := Message{SessionID: id, Ordinal: row.Ordinal, Role: row.Role, SourceUUID: row.sourceID}
+			if row.body != nil {
+				msg.Content = *row.body
+			}
 			if row.Timestamp != nil {
 				msg.Timestamp = *row.Timestamp
 			}
