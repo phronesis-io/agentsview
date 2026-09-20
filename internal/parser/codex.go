@@ -644,6 +644,9 @@ func (b *codexSessionBuilder) handleFunctionCall(
 
 	content := formatCodexFunctionCall(name, payload)
 	inputJSON := extractCodexInputJSON(payload)
+	if name == "exec" {
+		inputJSON = codexExecScriptInputJSON(inputJSON)
+	}
 	skillName := inferCodexSkillNameWithBase(b.projectContext, name, inputJSON, b.cwd)
 	waitAgentIDs := []string(nil)
 	if isCodexWaitAgentCall(name) && callID != "" {
@@ -736,6 +739,9 @@ func (b *codexSessionBuilder) handleFunctionCallOutput(ctx context.Context,
 			return true
 		})
 	default:
+		if flat, ok := codexFlattenOutputBlocks(output); ok {
+			raw = flat
+		}
 		if text := strings.TrimSpace(raw); text != "" {
 			source := "function_call_output"
 			status := ""
