@@ -58,8 +58,8 @@ func (db *DB) usageOnlyStorage() bool {
 	return db.ArchiveContent().UsageOnly()
 }
 
-// ErrArchiveContentExcluded reports a write that the archive's content
-// policy does not store. Callers can match it with errors.Is.
+// ErrArchiveContentExcluded reports data that the archive's content policy
+// does not permit storing or exporting. Callers can match it with errors.Is.
 var ErrArchiveContentExcluded = errors.New(
 	"archive content policy excludes this data",
 )

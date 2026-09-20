@@ -216,6 +216,9 @@ func conversationArchiveIdentity(ctx context.Context, tx *sql.Tx) (string, strin
 // Project evidence and the body are resolved in the same archive snapshot.
 func (db *DB) GetConversationMessage(ctx context.Context, opts ConversationMessageOptions) (ConversationMessage, error) {
 	var result ConversationMessage
+	if db.usageOnlyStorage() {
+		return result, fmt.Errorf("%w: conversation text is unavailable under archive_content=usage", ErrArchiveContentExcluded)
+	}
 	if opts.DatabaseID == "" || opts.SessionID == "" || opts.MessageID == "" || opts.Revision == "" {
 		return result, errors.New("database id, session id, message id and revision are required")
 	}

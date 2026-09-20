@@ -78,6 +78,49 @@ func TestConversationExportFreshArchiveSurvivesReopen(t *testing.T) {
 	assert.Empty(t, delta.Changes)
 }
 
+func TestConversationExportUsageReopenRejectsStoredBodies(t *testing.T) {
+	for _, policy := range []config.ArchiveContent{config.ArchiveContentFull, config.ArchiveContentTranscripts} {
+		t.Run(string(policy), func(t *testing.T) {
+			d := testDB(t)
+			d.SetArchiveContent(policy)
+			require.NoError(t, d.UpsertSession(t.Context(), Session{ID: "chat", Project: "sample", Machine: "local", Agent: "gemini"}))
+			require.NoError(t, d.InsertMessages(t.Context(), []Message{{
+				SessionID: "chat", Role: "assistant", Content: "Saved reply", SourceUUID: "reply-one",
+			}}))
+			initial, err := d.ExportConversationChanges(t.Context(), ConversationExportOptions{})
+			require.NoError(t, err)
+			require.Len(t, initial.Changes, 1)
+			original := initial.Changes[0]
+			opts := ConversationMessageOptions{
+				DatabaseID: initial.DatabaseID, SessionID: "chat", MessageID: original.MessageID, Revision: original.Revision,
+			}
+			body, err := d.GetConversationMessage(t.Context(), opts)
+			require.NoError(t, err)
+			require.NotNil(t, body.Text)
+			assert.Equal(t, "Saved reply", *body.Text)
+			require.NoError(t, d.Close())
+
+			usage, err := OpenWithArchiveContent(t.Context(), d.Path(), config.ArchiveContentUsage)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, usage.Close()) })
+			body, err = usage.GetConversationMessage(t.Context(), opts)
+			require.ErrorIs(t, err, ErrArchiveContentExcluded)
+			assert.Nil(t, body.Text)
+			require.NoError(t, usage.Close())
+
+			// Reopening does not rewrite normalized messages. If their text is
+			// still stored, returning to the original policy makes it available.
+			reopened, err := OpenWithArchiveContent(t.Context(), d.Path(), policy)
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+			body, err = reopened.GetConversationMessage(t.Context(), opts)
+			require.NoError(t, err)
+			require.NotNil(t, body.Text)
+			assert.Equal(t, "Saved reply", *body.Text)
+		})
+	}
+}
+
 // A token-only rewrite must not resend prose, while a streamed text change
 // must retain the source message's identity and publish the new body.
 func TestConversationExportNativeMessageChanges(t *testing.T) {
@@ -273,7 +316,10 @@ func TestConversationExportCopiedUsagePolicyDropsBody(t *testing.T) {
 	assert.Equal(t, "session", result.Changes[1].Type)
 	assert.Equal(t, "archive_content_excluded", result.Changes[1].Gap)
 	change := result.Changes[0]
-	body, err := destination.GetConversationMessage(ctx, ConversationMessageOptions{DatabaseID: result.DatabaseID, SessionID: "orphan", MessageID: change.MessageID, Revision: change.Revision})
+	reader, err := OpenReadOnly(ctx, destination.Path())
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, reader.Close()) })
+	body, err := reader.GetConversationMessage(ctx, ConversationMessageOptions{DatabaseID: result.DatabaseID, SessionID: "orphan", MessageID: change.MessageID, Revision: change.Revision})
 	require.NoError(t, err)
 	assert.Nil(t, body.Text)
 	assert.Equal(t, "archive_content_excluded", body.Gap)

@@ -81,6 +81,43 @@ func TestExportConversationsEmptyCheckpoint(t *testing.T) {
 	assert.Empty(t, next.Changes)
 }
 
+func TestExportConversationUsagePolicyRejectsStoredBodyBeforeRestart(t *testing.T) {
+	path := filepath.Join(testDataDir(t), "sessions.db")
+	t.Setenv("AGENTSVIEW_ARCHIVE_CONTENT", "full")
+	database := dbtest.OpenTestDBAt(t, path)
+	insertExportSessionsTestSession(t, database, db.Session{
+		ID: "chat", Project: "sample", Machine: "local", Agent: "gemini",
+	})
+	require.NoError(t, database.InsertMessages(t.Context(), []db.Message{{
+		SessionID: "chat", Role: "assistant", Content: "Saved reply", SourceUUID: "reply-one",
+	}}))
+	page, err := database.ExportConversationChanges(t.Context(), db.ConversationExportOptions{})
+	require.NoError(t, err)
+	require.Len(t, page.Changes, 1)
+	change := page.Changes[0]
+	require.NoError(t, database.Close())
+	args := []string{
+		"export", "conversations", "message", change.SessionID, change.MessageID,
+		"--revision", change.Revision, "--database-id", page.DatabaseID,
+	}
+	stdout, _, err := executeExportSessionsCommand(newRootCommand(), args...)
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "Saved reply")
+	before, err := os.ReadFile(path)
+	require.NoError(t, err)
+
+	t.Setenv("AGENTSVIEW_ARCHIVE_CONTENT", "usage")
+	stdout, _, err = executeExportSessionsCommand(newRootCommand(), args...)
+	require.ErrorIs(t, err, db.ErrArchiveContentExcluded)
+	assert.Empty(t, stdout)
+	stdout, _, err = executeExportSessionsCommand(newRootCommand(), "export", "conversations", "changes")
+	require.NoError(t, err, "text-free change listings remain available")
+	assert.NotContains(t, stdout, "Saved reply")
+	after, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, before, after, "read-only exports must not rewrite the archive")
+}
+
 func TestExportConversationsPagesBodiesAndCorrections(t *testing.T) {
 	path := filepath.Join(testDataDir(t), "sessions.db")
 	database := dbtest.OpenTestDBAt(t, path)

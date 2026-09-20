@@ -93,6 +93,11 @@ already present in `content` are preserved. The export does not reinterpret
 provider formats or apply a second classification of message text. Storage
 policies still control which content is retained and available for export.
 
+With `archive_content=usage`, fetching message text fails with an error and
+leaves stdout empty, even before the daemon restarts. Text-free change listings
+remain available. To apply the storage policy to existing archive content,
+follow the [archive content instructions](/docs/configuration/#archive-content).
+
 Existing session summaries remain content-free. Their usage and cost are session
 facts, not measured per-message costs or human working time. Join records
 through archive and session identity; do not spread session cost evenly over
