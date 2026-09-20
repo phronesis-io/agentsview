@@ -1288,6 +1288,9 @@ const SessionKindNonInteractive = "non-interactive"
 // is the roborev feature tag (`codex exec --thread-source roborev`).
 const SessionKindRoborev = "roborev"
 
+// SessionKindGuardianReview identifies persisted Codex permission reviews.
+const SessionKindGuardianReview = "guardian_review"
+
 // FileInfo holds file system metadata for a session source file.
 type FileInfo struct {
 	Path   string

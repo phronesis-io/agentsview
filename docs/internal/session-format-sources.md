@@ -387,6 +387,20 @@ add an archived or maintained mirror without replacing the original identity.
 
 ## Codex (`codex`)
 
+- **Permission reviews (reverified 2026-09-20):** The pinned
+  [delegate implementation](https://github.com/openai/codex/blob/a44454656459437fc8e2ffa9eca0646537b1fdfd/codex-rs/core/src/codex_delegate.rs#L74-L112)
+  preserves the parent thread and marks Guardian delegates as
+  `guardian_review`. AgentsView retains that distinction in `session_kind`;
+  the observed `source.subagent.other = guardian` is also accepted. Ordinary
+  review subagents are not permission reviews. Locally observed persisted
+  requests use a final `APPROVAL REQUEST START`/`END` envelope containing
+  `Planned action JSON`; responses contain `outcome`, `risk_level`,
+  `user_authorization`, and `rationale`. These envelope and response fields
+  are observed format evidence, not a public persistence guarantee. One
+  review session can contain multiple request/response pairs. The UI displays
+  every saved pair and preserves unknown or missing results without inferring
+  approval from execution success. Synthetic fixtures cover these boundaries.
+
 - **Tool-result image check (2026-09-08):** Reverified the pinned
   [output payload types and array tests](https://github.com/openai/codex/blob/406dc9239492aff6d295cca5eebe2a548548d42f/codex-rs/protocol/src/models.rs).
   `function_call_output.output` accepts a string or a content-item array.

@@ -46,6 +46,7 @@
   import StatusBar from "./lib/components/layout/StatusBar.svelte";
   import SessionList from "./lib/components/sidebar/SessionList.svelte";
   import MessageList from "./lib/components/content/MessageList.svelte";
+  import ApprovalPanel from "./lib/components/content/ApprovalPanel.svelte";
   import SessionVitals from "./lib/components/content/SessionVitals.svelte";
   import { sessionActivity } from "./lib/stores/sessionActivity.svelte.js";
   import { sessionTiming } from "./lib/stores/sessionTiming.svelte.js";
@@ -829,6 +830,10 @@
   <div class="page-scroll">
     <QualityPage />
   </div>
+{:else if router.route === "approvals"}
+  <div class="page-scroll">
+    <ApprovalPanel fullPage />
+  </div>
 {:else if router.route === "pinned"}
   <div class="page-scroll">
     <PinnedPage />
@@ -862,6 +867,11 @@
           session={session}
           onBack={() => sessions.deselectSession()}
         />
+        {#if session?.agent === "codex"}
+          {#key sessions.activeSessionId}
+            <ApprovalPanel sessionId={sessions.activeSessionId} />
+          {/key}
+        {/if}
         <MessageList bind:this={messageListRef} />
       {:else}
         <AnalyticsPage

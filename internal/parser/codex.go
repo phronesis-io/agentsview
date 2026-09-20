@@ -424,6 +424,10 @@ func (b *codexSessionBuilder) handleSessionMeta(
 	if payload.Get("thread_source").Str == SessionKindRoborev {
 		b.sessionKind = SessionKindRoborev
 	}
+	if payload.Get("thread_source").Str == SessionKindGuardianReview ||
+		payload.Get("source.subagent.other").Str == "guardian" {
+		b.sessionKind = SessionKindGuardianReview
+	}
 
 	if cwd := payload.Get("cwd").Str; cwd != "" {
 		b.cwd = cwd

@@ -129,9 +129,31 @@ func TestParseCodexSession_GuardianReviewIssue1644(t *testing.T) {
 	assert.Equal(t, "codex:01a00000-0000-7000-8000-000000000002", sess.ID)
 	assert.Equal(t, "codex:01a00000-0000-7000-8000-000000000001", sess.ParentSessionID)
 	assert.Equal(t, RelSubagent, sess.RelationshipType)
+	assert.Equal(t, SessionKindGuardianReview, sess.SessionKind)
 	require.Len(t, msgs, 2)
 	assert.Equal(t, "review the retry change for safety", msgs[0].Content)
 	assert.Equal(t, "No blocking issues found in the retry change.", msgs[1].Content)
+}
+
+func TestParseCodexSession_PermissionReviewKind(t *testing.T) {
+	for _, tc := range []struct {
+		name, source, threadSource, want string
+	}{
+		{"guardian marker", `{"subagent":{"other":"guardian"}}`, "", SessionKindGuardianReview},
+		{"guardian thread source", `"cli"`, "guardian_review", SessionKindGuardianReview},
+		{"ordinary subagent", `{"subagent":{"other":"worker"}}`, "subagent", ""},
+		{"code review", `{"subagent":"review"}`, "", ""},
+		{"roborev", `"exec"`, "roborev", SessionKindRoborev},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := fmt.Sprintf(`{"type":"session_meta","payload":{"id":"review-kind","cwd":"/tmp/project","source":%s,"thread_source":%q}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Review this action"}]}}
+`, tc.source, tc.threadSource)
+			sess, _ := runCodexParserTest(t, "review-kind.jsonl", content, false)
+			require.NotNil(t, sess)
+			assert.Equal(t, tc.want, sess.SessionKind)
+		})
+	}
 }
 
 func TestParseCodexSession_TracksMalformedMiddleRecord(t *testing.T) {

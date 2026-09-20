@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import {
+    Button,
     SplitResizeHandle,
     type SplitResizeEvent,
   } from "@kenn-io/kit-ui";
@@ -272,6 +273,9 @@
         <LightbulbIcon size="12" strokeWidth="2" aria-hidden="true" />
         {m.nav_recall()}
       </button>
+      <Button size="sm" onclick={() => mobileNav("approvals")}>
+        {m.approvals_title()}
+      </Button>
       <button
         class="mobile-nav-btn"
         class:active={router.route === "pinned"}

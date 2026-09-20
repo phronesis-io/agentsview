@@ -62,7 +62,7 @@ describe("parsePath", () => {
   });
 
   it("parses page routes", () => {
-    for (const route of ["usage", "trends", "recall", "quality", "pinned", "trash", "settings"]) {
+    for (const route of ["usage", "trends", "recall", "quality", "pinned", "approvals", "trash", "settings"]) {
       setURL(`/${route}`);
       const result = parsePath();
       expect(result.route).toBe(route);
